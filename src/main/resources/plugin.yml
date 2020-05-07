@@ -1,6 +1,6 @@
 name: PmChair
 main: maru.PmChair
-author: maru, PetteriM1
+author: maru, PetteriM1, ZenSirzechs
 version: "${pom.version}"
 api: ["1.0.9"]
 

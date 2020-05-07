@@ -8,28 +8,35 @@ import cn.nukkit.command.CommandSender;
 import cn.nukkit.entity.Entity;
 import cn.nukkit.entity.data.EntityMetadata;
 import cn.nukkit.event.EventHandler;
+import cn.nukkit.event.EventPriority;
 import cn.nukkit.event.Listener;
 import cn.nukkit.event.player.PlayerInteractEvent;
+import cn.nukkit.event.player.PlayerJoinEvent;
 import cn.nukkit.event.player.PlayerQuitEvent;
+import cn.nukkit.event.player.PlayerTeleportEvent;
 import cn.nukkit.event.server.DataPacketReceiveEvent;
 import cn.nukkit.network.protocol.*;
 import cn.nukkit.plugin.PluginBase;
 import cn.nukkit.utils.Config;
 import cn.nukkit.utils.TextFormat;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 
 public class PmChair extends PluginBase implements Listener {
 
-    private Map<String, Long> onChair = new HashMap<>();
-    private Map<String, Long> doubleTap = new HashMap<>();
-    private Map<String, Long> tagblock = new HashMap<>();
+    private final Long2LongOpenHashMap onChair = new Long2LongOpenHashMap();
+    private final Long2LongOpenHashMap doubleTap = new Long2LongOpenHashMap();
+    private final Long2LongOpenHashMap tagblock = new Long2LongOpenHashMap();
+
+    private final Long2ObjectOpenHashMap<HashSet<DataPacket>> chairPackets = new Long2ObjectOpenHashMap<>();
+
     private Map<String, Object> messages;
-    private List<String> disabled = new ArrayList<>();
+    private final LongOpenHashSet disabled = new LongOpenHashSet();
 
     private static final int[] faces = new int[]{90, 270, 180, 0, 90, 270, 180, 0};
 
@@ -59,27 +66,28 @@ public class PmChair extends PluginBase implements Listener {
     }
 
     @EventHandler
-    public void onTouch(PlayerInteractEvent event) {
+    private void onTouch(PlayerInteractEvent event) {
         Player player = event.getPlayer();
-        if (player.isSneaking() || event.getAction() != PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK || disabled.contains(player.getName())) {
+        long id = player.getId();
+
+        if (player.isSneaking() || event.getAction() != PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK || disabled.contains(id)) {
             return;
         }
 
-        String name = player.getName().toLowerCase();
         Block block = event.getBlock();
 
-        if (!this.onChair.containsKey(name)) {
+        if (!this.onChair.containsKey(id)) {
             if (block instanceof BlockStairs) {
-                if (!this.doubleTap.containsKey(name)) {
-                    this.doubleTap.put(name, System.currentTimeMillis());
+                if (!this.doubleTap.containsKey(id)) {
+                    this.doubleTap.put(id, System.currentTimeMillis());
                     player.sendPopup(TextFormat.RED + this.get("touch-popup"));
                     return;
                 }
 
-                if (System.currentTimeMillis() - this.doubleTap.get(name) < 500) {
+                if (System.currentTimeMillis() - this.doubleTap.get(id) < 1000) {
                     AddEntityPacket addTagblockPacket = new AddEntityPacket();
                     long eid = Entity.entityCount++;
-                    this.tagblock.put(name, eid);
+                    this.tagblock.put(id, eid);
                     addTagblockPacket.entityRuntimeId = eid;
                     addTagblockPacket.entityUniqueId = eid;
                     addTagblockPacket.speedX = 0;
@@ -114,7 +122,7 @@ public class PmChair extends PluginBase implements Listener {
 
                     AddEntityPacket addEntityPacket = new AddEntityPacket();
                     eid = Entity.entityCount++;
-                    this.onChair.put(name, eid);
+                    this.onChair.put(id, eid);
                     addEntityPacket.entityRuntimeId = eid;
                     addEntityPacket.entityUniqueId = eid;
                     addEntityPacket.speedX = 0;
@@ -161,59 +169,92 @@ public class PmChair extends PluginBase implements Listener {
                         target.dataPacket(moveTagblockPacket);
                         target.dataPacket(setEntityLinkPacket);
                     });
+                    HashSet<DataPacket> packets = new HashSet<>();
+                    packets.add(addEntityPacket);
+                    packets.add(moveEntityPacket);
+                    packets.add(addTagblockPacket);
+                    packets.add(moveTagblockPacket);
+                    packets.add(setEntityLinkPacket);
+                    chairPackets.put(id, packets);
 
                     player.setDataFlag(Entity.DATA_FLAGS, Entity.DATA_FLAG_RIDING, true);
-                    this.doubleTap.remove(name);
+                    this.doubleTap.remove(id);
                 } else {
-                    this.doubleTap.put(name, System.currentTimeMillis());
+                    this.doubleTap.put(id, System.currentTimeMillis());
                     player.sendPopup(TextFormat.RED + this.get("touch-popup"));
                 }
             }
         } else {
             RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
-            removeEntityPacket.eid = this.onChair.remove(name);
+            removeEntityPacket.eid = this.onChair.remove(id);
             RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
-            removeTagblockPacket.eid = this.tagblock.remove(name);
+            removeTagblockPacket.eid = this.tagblock.remove(id);
             this.getServer().getOnlinePlayers().values().forEach((p) -> {
                 p.dataPacket(removeEntityPacket);
                 p.dataPacket(removeTagblockPacket);
             });
+            chairPackets.remove(id);
         }
     }
 
     @EventHandler
-    public void onJump(DataPacketReceiveEvent event) {
+    private void onJump(DataPacketReceiveEvent event) {
         if (event.getPacket().pid() == ProtocolInfo.PLAYER_ACTION_PACKET) {
             PlayerActionPacket packet = (PlayerActionPacket) event.getPacket();
-            String name = event.getPlayer().getName().toLowerCase();
-            if (packet.action == PlayerActionPacket.ACTION_JUMP && this.onChair.containsKey(name)) {
+            long id = event.getPlayer().getId();
+            if (packet.action == PlayerActionPacket.ACTION_JUMP && this.onChair.containsKey(id)) {
                 RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
-                removeEntityPacket.eid = this.onChair.remove(name);
+                removeEntityPacket.eid = this.onChair.remove(id);
                 RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
-                removeTagblockPacket.eid = this.tagblock.remove(name);
+                removeTagblockPacket.eid = this.tagblock.remove(id);
                 this.getServer().getOnlinePlayers().values().forEach((p) -> {
                     p.dataPacket(removeEntityPacket);
                     p.dataPacket(removeTagblockPacket);
                 });
+                chairPackets.remove(id);
             }
         }
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    private void onJoin(PlayerJoinEvent event) {
+        this.getServer().getScheduler().scheduleDelayedTask(() ->
+                        chairPackets.values().forEach(set -> set.forEach(event.getPlayer()::dataPacket))
+                , 40); //Needs delay to be detected
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        disabled.remove(event.getPlayer().getName());
-        String name = event.getPlayer().getName().toLowerCase();
-        if (!this.onChair.containsKey(name)) {
+        long id = event.getPlayer().getId();
+        disabled.remove(id);
+        if (!this.onChair.containsKey(id)) {
             return;
         }
         RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
-        removeEntityPacket.eid = this.onChair.remove(name);
+        removeEntityPacket.eid = this.onChair.remove(id);
         RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
-        removeTagblockPacket.eid = this.tagblock.remove(name);
+        removeTagblockPacket.eid = this.tagblock.remove(id);
         this.getServer().getOnlinePlayers().values().forEach((p) -> {
             p.dataPacket(removeEntityPacket);
             p.dataPacket(removeTagblockPacket);
         });
+        chairPackets.remove(id);
+    }
+
+    @EventHandler
+    private void onTeleport(PlayerTeleportEvent event) {
+        long id = event.getPlayer().getId();
+        if (onChair.containsKey(id)) {
+            RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
+            removeEntityPacket.eid = this.onChair.remove(id);
+            RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
+            removeTagblockPacket.eid = this.tagblock.remove(id);
+            this.getServer().getOnlinePlayers().values().forEach((p) -> {
+                p.dataPacket(removeEntityPacket);
+                p.dataPacket(removeTagblockPacket);
+            });
+            chairPackets.remove(id);
+        }
     }
 
     @Override
@@ -227,11 +268,12 @@ public class PmChair extends PluginBase implements Listener {
                 return false;
             }
 
+            long id = ((Player) sender).getId();
             if ("off".equals(args[0])) {
-                disabled.add(sender.getName());
+                disabled.add(id);
                 sender.sendMessage("\u00A7aDisabled");
             } else if ("on".equals(args[0])) {
-                disabled.remove(sender.getName());
+                disabled.remove(id);
                 sender.sendMessage("\u00A7aEnabled");
             } else {
                 return false;
