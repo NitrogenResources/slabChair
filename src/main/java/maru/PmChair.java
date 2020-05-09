@@ -177,7 +177,7 @@ public class PmChair extends PluginBase implements Listener {
                     packets.add(setEntityLinkPacket);
                     chairPackets.put(id, packets);
 
-                    player.setDataFlag(Entity.DATA_FLAGS, Entity.DATA_FLAG_RIDING, true);
+                    //player.setDataFlag(Entity.DATA_FLAGS, Entity.DATA_FLAG_RIDING, true); Not really needed?
                     this.doubleTap.remove(id);
                 } else {
                     this.doubleTap.put(id, System.currentTimeMillis());
@@ -202,16 +202,18 @@ public class PmChair extends PluginBase implements Listener {
         if (event.getPacket().pid() == ProtocolInfo.PLAYER_ACTION_PACKET) {
             PlayerActionPacket packet = (PlayerActionPacket) event.getPacket();
             long id = event.getPlayer().getId();
-            if (packet.action == PlayerActionPacket.ACTION_JUMP && this.onChair.containsKey(id)) {
-                RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
-                removeEntityPacket.eid = this.onChair.remove(id);
-                RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
-                removeTagblockPacket.eid = this.tagblock.remove(id);
-                this.getServer().getOnlinePlayers().values().forEach((p) -> {
-                    p.dataPacket(removeEntityPacket);
-                    p.dataPacket(removeTagblockPacket);
-                });
-                chairPackets.remove(id);
+            if (packet.action == PlayerActionPacket.ACTION_JUMP || packet.action == PlayerActionPacket.ACTION_START_SNEAK) { //This one is for the windows users and their bug
+                if (this.onChair.containsKey(id)) {
+                    RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
+                    removeEntityPacket.eid = this.onChair.remove(id);
+                    RemoveEntityPacket removeTagblockPacket = new RemoveEntityPacket();
+                    removeTagblockPacket.eid = this.tagblock.remove(id);
+                    chairPackets.remove(id);
+                    this.getServer().getOnlinePlayers().values().forEach((p) -> {
+                        p.dataPacket(removeEntityPacket);
+                        p.dataPacket(removeTagblockPacket);
+                    });
+                }
             }
         }
     }
