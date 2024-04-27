@@ -2,7 +2,7 @@ package maru;
 
 import cn.nukkit.Player;
 import cn.nukkit.block.Block;
-import cn.nukkit.block.BlockStairs;
+import cn.nukkit.block.BlockSlabWood;
 import cn.nukkit.command.Command;
 import cn.nukkit.command.CommandSender;
 import cn.nukkit.entity.Entity;
@@ -77,7 +77,7 @@ public class PmChair extends PluginBase implements Listener {
         Block block = event.getBlock();
 
         if (!this.onChair.containsKey(id)) {
-            if (block instanceof BlockStairs) {
+            if (block instanceof BlockSlabWood) {
                 if (!this.doubleTap.containsKey(id)) {
                     this.doubleTap.put(id, System.currentTimeMillis());
                     player.sendPopup(TextFormat.RED + this.get("touch-popup"));
